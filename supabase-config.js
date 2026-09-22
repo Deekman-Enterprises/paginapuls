@@ -7,5 +7,5 @@
 // Row Level Security policies uit supabase/schema.sql, niet in het geheimhouden
 // van deze key. Gebruik NOOIT de "service_role"-key hier of ergens anders in
 // deze site.
-window.SUPABASE_URL = "https://pbcvshcrxecvkvcivxlc.supabase.co/rest/v1/";
+window.SUPABASE_URL = "https://pbcvshcrxecvkvcivxlc.supabase.co";
 window.SUPABASE_ANON_KEY = "sb_publishable_fV04zOcCP6_S5Cvin324fg_KJBpztaf";
