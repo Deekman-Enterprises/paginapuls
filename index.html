@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Paginapuls</title>
+<!-- Google tag (gtag.js) — Paginapuls zelf (pilot), meet bezoek aan dit dashboard -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-TJPJ22K99Q"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-TJPJ22K99Q');
+</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
   :root{
@@ -411,11 +419,19 @@
   .modal-card p.hint{font-size:12px;color:var(--ink-muted);margin:-6px 0 4px;}
   .field{display:flex;flex-direction:column;gap:5px;}
   .field label{font-size:12px;font-weight:600;color:var(--ink-soft);}
-  .field input,.field select{
+  .field input,.field select,.field textarea{
     font-family:inherit;font-size:13.5px;padding:9px 10px;border-radius:9px;
     border:1px solid var(--border-strong);background:var(--surface-page);color:var(--ink);
   }
-  .field input:focus,.field select:focus{outline:2px solid var(--accent);outline-offset:0;}
+  .field textarea{resize:vertical;min-height:90px;line-height:1.5;}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:0;}
+  .bureau-lock-note{
+    background:var(--accent-soft);border:1px solid var(--border);border-radius:var(--radius-card);
+    padding:10px 14px;font-size:12.5px;color:var(--ink-soft);
+  }
+  .bureau-lock-note strong{color:var(--ink);}
+  .bureau-save-row{display:flex;justify-content:flex-end;gap:8px;margin-top:4px;}
+  .bureau-save-msg{font-size:12px;color:var(--good);align-self:center;margin-right:auto;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;}
   .btn{
     font-size:13px;font-weight:700;border-radius:9px;padding:9px 16px;cursor:pointer;border:1px solid transparent;
@@ -612,12 +628,14 @@
       <button class="tab" data-tab="seo" type="button">SEO</button>
       <button class="tab" data-tab="zoekwoorden" type="button">Zoekwoorden</button>
       <button class="tab" data-tab="concurrentie" type="button">Concurrentie</button>
+      <button class="tab" data-tab="intern" type="button">Bureau</button>
     </nav>
 
     <section class="tab-panel" id="panel-overzicht"></section>
     <section class="tab-panel" id="panel-seo" hidden></section>
     <section class="tab-panel" id="panel-zoekwoorden" hidden></section>
     <section class="tab-panel" id="panel-concurrentie" hidden></section>
+    <section class="tab-panel" id="panel-intern" hidden></section>
   </main>
 </div>
 
@@ -757,6 +775,16 @@ function fmtDur(sec){
 }
 function fmtDateShort(d){
   return d.toLocaleDateString('nl-NL',{day:'numeric',month:'short'});
+}
+function fmtEuro(n){
+  if (n==null || isNaN(n)) return '—';
+  return new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n);
+}
+function fmtDateNl(s){
+  if (!s) return '—';
+  var d = new Date(s+'T00:00:00');
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'});
 }
 function addDays(d,n){ var r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function slugify(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''); }
@@ -950,7 +978,8 @@ var ISSUE_POOL = {
 /* ============================================================
    Data generation
 ============================================================ */
-function buildSite(id, name, url, sectorKey, seedSuffix, contact){
+function buildSite(id, name, url, sectorKey, seedSuffix, contact, extra){
+  extra = extra || {};
   var tpl = TEMPLATES[sectorKey] || TEMPLATES.algemeen;
   // Seed intentionally excludes name/url/contact so renaming a site in Instellingen
   // never reshuffles its demo numbers.
@@ -1045,13 +1074,54 @@ function buildSite(id, name, url, sectorKey, seedSuffix, contact){
     return {q:k.q, you:k.position, competitors:comps};
   });
 
+  // --- Bureau-only diepere data (nooit getoond aan de klant, zie renderClientPortal) ---
+  // Eigen rng-reeks (apart geseed) zodat toevoeging hiervan de bestaande demodata hierboven
+  // niet laat verschuiven.
+  var brng = makeRng(id + '|bureau|' + (seedSuffix||''));
+
+  function makeDomainProfile(){
+    return {
+      domainRating: clamp(round(24 + brng()*58), 8, 92),
+      backlinks: round(80 + brng()*brng()*6200),
+      refDomains: round(8 + brng()*brng()*180),
+      indexedPages: round(12 + brng()*140)
+    };
+  }
+  var domainProfile = makeDomainProfile();
+  var competitorProfiles = competitorNames.map(function(nm){
+    var p = makeDomainProfile();
+    p.name = nm;
+    return p;
+  });
+
+  // Technische dieptedetail per pagina (Core Web Vitals-achtige metingen, indexeerbaarheid, schema.org)
+  var pageAudit = pages.map(function(p){
+    var lcp = +(1.1 + brng()*3.2).toFixed(1);
+    var cls = +(0.01 + brng()*0.28).toFixed(2);
+    var indexable = brng() < 0.9;
+    var hasSchema = brng() < 0.55;
+    var wordCount = round(180 + brng()*1400);
+    var internalLinks = round(2 + brng()*22);
+    return {
+      path:p.path, title:p.title, lcp:lcp, cls:cls,
+      indexable:indexable, hasSchema:hasSchema,
+      wordCount:wordCount, internalLinks:internalLinks
+    };
+  });
+
   return {
     id:id, name:name, url:url, sector:tpl.sector, sectorKey:sectorKey, seedSuffix:seedSuffix||null,
     contactName: (contact && contact.name) || '', contactEmail: (contact && contact.email) || '',
     series:series, bounce:bounce, duration:duration, sources:sources,
     pages:pages, seo:seo, seoOverall:overall, issues:issues,
     keywords:keywords, ranking:ranking, competitorNames:competitorNames,
-    statusOf:statusOf
+    statusOf:statusOf,
+    // Bureau-only (zie renderIntern) — nooit gebruikt in renderClientPortal
+    domainProfile:domainProfile, competitorProfiles:competitorProfiles, pageAudit:pageAudit,
+    internalNotes: extra.internalNotes || '',
+    contractValue: extra.contractValue==null ? null : Number(extra.contractValue),
+    contractStatus: extra.contractStatus || 'actief',
+    nextInvoiceDate: extra.nextInvoiceDate || null
   };
 }
 
@@ -1566,6 +1636,125 @@ function renderConcurrentie(){
 }
 
 /* ============================================================
+   Render: Bureau tab (intern) — alleen zichtbaar voor het bureau, nooit voor de klant
+   (renderClientPortal hieronder gebruikt geen van deze velden/functies)
+============================================================ */
+function renderIntern(){
+  var site = activeSite();
+  var panel = document.getElementById('panel-intern');
+
+  var statusOptions = [
+    {v:'actief', l:'Actief'},
+    {v:'gepauzeerd', l:'Gepauzeerd'},
+    {v:'opgezegd', l:'Opgezegd'}
+  ];
+  var statusOptHtml = statusOptions.map(function(o){
+    return '<option value="'+o.v+'"'+(site.contractStatus===o.v?' selected':'')+'>'+o.l+'</option>';
+  }).join('');
+  var statusChipClass = site.contractStatus==='actief' ? 'good' : (site.contractStatus==='gepauzeerd' ? 'warning' : 'critical');
+  var statusChipLabel = statusOptions.filter(function(o){ return o.v===site.contractStatus; })[0].l;
+
+  var auditRows = site.pageAudit.map(function(p){
+    var lcpOk = p.lcp <= 2.5, clsOk = p.cls <= 0.1;
+    return '<tr>'+
+      '<td><div class="page-title"></div><div class="page-path"></div></td>'+
+      '<td class="num"><span class="status-chip '+(lcpOk?'good':(p.lcp<=4?'warning':'critical'))+'">'+p.lcp+'s</span></td>'+
+      '<td class="num"><span class="status-chip '+(clsOk?'good':(p.cls<=0.25?'warning':'critical'))+'">'+p.cls+'</span></td>'+
+      '<td class="num">'+(p.indexable?'Ja':'Nee')+'</td>'+
+      '<td class="num">'+(p.hasSchema?'Ja':'Nee')+'</td>'+
+      '<td class="num">'+fmtInt(p.wordCount)+'</td>'+
+      '<td class="num">'+p.internalLinks+'</td>'+
+    '</tr>';
+  }).join('');
+
+  var domainRows = [{name:site.name+' (jij)', isClient:true, p:site.domainProfile}].concat(
+    site.competitorProfiles.map(function(c){ return {name:c.name, isClient:false, p:c}; })
+  ).map(function(row){
+    return '<tr'+(row.isClient?' class="issue-row"':'')+'>'+
+      '<td>'+(row.isClient?'<strong></strong>':'<span></span>')+'</td>'+
+      '<td class="num"></td><td class="num"></td><td class="num"></td><td class="num"></td>'+
+    '</tr>';
+  }).join('');
+
+  panel.innerHTML =
+    '<div class="bureau-lock-note"><strong>Alleen voor het bureau.</strong> Deze informatie is nooit zichtbaar in het klantportaal.</div>'+
+    '<div class="grid-2">'+
+      '<div class="card">'+
+        '<div class="card-head"><div><div class="card-title">Interne notities</div><div class="card-sub">Alleen zichtbaar voor het bureau</div></div></div>'+
+        '<div class="field"><textarea id="internNotes" placeholder="Bijv. afspraken, bijzonderheden, contactvoorkeuren…"></textarea></div>'+
+        '<div class="bureau-save-row"><span class="bureau-save-msg" id="internNotesMsg"></span><button type="button" class="btn btn-primary btn-small" id="internNotesSave">Notities opslaan</button></div>'+
+      '</div>'+
+      '<div class="card">'+
+        '<div class="card-head"><div><div class="card-title">Financieel overzicht</div><div class="card-sub">Contractgegevens van deze klant</div></div></div>'+
+        '<div class="settings-edit-grid" style="margin-bottom:10px;">'+
+          '<div class="field"><label>Maandbedrag (&euro;)</label><input type="number" min="0" step="1" id="internContractValue"></div>'+
+          '<div class="field"><label>Contractstatus</label><select id="internContractStatus">'+statusOptHtml+'</select></div>'+
+          '<div class="field"><label>Volgende factuurdatum</label><input type="date" id="internNextInvoice"></div>'+
+        '</div>'+
+        '<div style="margin-bottom:8px;"><span class="status-chip '+statusChipClass+'">'+statusChipLabel+'</span></div>'+
+        '<div class="bureau-save-row"><span class="bureau-save-msg" id="internFinMsg"></span><button type="button" class="btn btn-primary btn-small" id="internFinSave">Financiën opslaan</button></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="card">'+
+      '<div class="card-head"><div><div class="card-title">Technische SEO &mdash; dieptedetail</div><div class="card-sub">Per-pagina meting: laadsnelheid (LCP), layoutstabiliteit (CLS), indexeerbaarheid en structuur</div></div></div>'+
+      '<div class="table-scroll"><table><thead><tr><th>Pagina</th><th class="num">LCP</th><th class="num">CLS</th><th class="num">Indexeerbaar</th><th class="num">Schema.org</th><th class="num">Woorden</th><th class="num">Interne links</th></tr></thead><tbody>'+auditRows+'</tbody></table></div>'+
+    '</div>'+
+    '<div class="card">'+
+      '<div class="card-head"><div><div class="card-title">Concurrentie-analyse in detail</div><div class="card-sub">Domeinsterkte-indicatoren t.o.v. concurrenten</div></div></div>'+
+      '<div class="table-scroll"><table><thead><tr><th>Domein</th><th class="num">Domain Rating</th><th class="num">Backlinks</th><th class="num">Verwijzende domeinen</th><th class="num">Ge&iuml;ndexeerde pagina&#39;s</th></tr></thead><tbody>'+domainRows+'</tbody></table></div>'+
+    '</div>';
+
+  document.getElementById('internNotes').value = site.internalNotes || '';
+  document.getElementById('internContractValue').value = site.contractValue==null ? '' : site.contractValue;
+  document.getElementById('internNextInvoice').value = site.nextInvoiceDate || '';
+
+  panel.querySelectorAll('.table-scroll table')[0].querySelectorAll('tbody tr').forEach(function(tr,i){
+    var p = site.pageAudit[i];
+    tr.querySelector('.page-title').textContent = p.title;
+    tr.querySelector('.page-path').textContent = p.path;
+  });
+  var domainAll = [{name:site.name+' (jij)', p:site.domainProfile}].concat(
+    site.competitorProfiles.map(function(c){ return {name:c.name, p:c}; })
+  );
+  panel.querySelectorAll('.table-scroll table')[1].querySelectorAll('tbody tr').forEach(function(tr,i){
+    var d = domainAll[i];
+    var nameEl = tr.querySelector('strong') || tr.querySelector('span');
+    nameEl.textContent = d.name;
+    tr.children[1].textContent = d.p.domainRating;
+    tr.children[2].textContent = fmtInt(d.p.backlinks);
+    tr.children[3].textContent = fmtInt(d.p.refDomains);
+    tr.children[4].textContent = fmtInt(d.p.indexedPages);
+  });
+
+  document.getElementById('internNotesSave').addEventListener('click', function(){
+    var val = document.getElementById('internNotes').value;
+    var msg = document.getElementById('internNotesMsg');
+    msg.textContent = '';
+    sb.from('sites').update({internal_notes: val}).eq('id', site.id).then(function(res){
+      if (res.error){ alert('Opslaan mislukt: '+res.error.message); return; }
+      msg.textContent = 'Opgeslagen ✓';
+      refreshDataAndRender();
+    });
+  });
+
+  document.getElementById('internFinSave').addEventListener('click', function(){
+    var rawValue = document.getElementById('internContractValue').value;
+    var contractValue = rawValue==='' ? null : Number(rawValue);
+    var contractStatus = document.getElementById('internContractStatus').value;
+    var nextInvoiceDate = document.getElementById('internNextInvoice').value || null;
+    var msg = document.getElementById('internFinMsg');
+    msg.textContent = '';
+    sb.from('sites').update({
+      contract_value: contractValue, contract_status: contractStatus, next_invoice_date: nextInvoiceDate
+    }).eq('id', site.id).then(function(res){
+      if (res.error){ alert('Opslaan mislukt: '+res.error.message); return; }
+      msg.textContent = 'Opgeslagen ✓';
+      refreshDataAndRender();
+    });
+  });
+}
+
+/* ============================================================
    Render: Client portal (simplified, single-site, no login security)
 ============================================================ */
 function renderClientPortal(site){
@@ -1805,7 +1994,7 @@ function determineRoleAndEnter(){
       return sb.from('sites').select('*').then(function(sitesRes){
         if (sitesRes.error) throw sitesRes.error;
         state.sites = (sitesRes.data||[]).map(function(row){
-          return buildSite(row.id, row.name, row.url, row.sector_key, row.seed_suffix, {name:row.contact_name, email:row.contact_email});
+          return buildSite(row.id, row.name, row.url, row.sector_key, row.seed_suffix, {name:row.contact_name, email:row.contact_email}, {internalNotes:row.internal_notes, contractValue:row.contract_value, contractStatus:row.contract_status, nextInvoiceDate:row.next_invoice_date});
         });
         if (!state.sites.length) throw new Error('Nog geen klantwebsites in de database.');
         state.activeId = state.sites[0].id;
@@ -1827,7 +2016,7 @@ function determineRoleAndEnter(){
         });
       }
       var row = rows[0];
-      var site = buildSite(row.id, row.name, row.url, row.sector_key, row.seed_suffix, {name:row.contact_name, email:row.contact_email});
+      var site = buildSite(row.id, row.name, row.url, row.sector_key, row.seed_suffix, {name:row.contact_name, email:row.contact_email}, {internalNotes:row.internal_notes, contractValue:row.contract_value, contractStatus:row.contract_status, nextInvoiceDate:row.next_invoice_date});
       state.sites = [site];
       enterClient(site);
     });
@@ -2106,6 +2295,7 @@ function renderAgencyApp(){
   else if (state.tab==='seo') renderSeo();
   else if (state.tab==='zoekwoorden') renderKeywords();
   else if (state.tab==='concurrentie') renderConcurrentie();
+  else if (state.tab==='intern') renderIntern();
 }
 
 /* ============================================================
@@ -2204,7 +2394,7 @@ function refreshDataAndRender(){
     state.team = teamRes.data || [];
     var prevActive = state.activeId;
     var newSites = (sitesRes.data||[]).map(function(row){
-      return buildSite(row.id, row.name, row.url, row.sector_key, row.seed_suffix, {name:row.contact_name, email:row.contact_email});
+      return buildSite(row.id, row.name, row.url, row.sector_key, row.seed_suffix, {name:row.contact_name, email:row.contact_email}, {internalNotes:row.internal_notes, contractValue:row.contract_value, contractStatus:row.contract_status, nextInvoiceDate:row.next_invoice_date});
     });
     if (!newSites.length) return; // nooit de UI stranden op nul sites tijdens het bewerken
     state.sites = newSites;
