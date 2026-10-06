@@ -185,6 +185,30 @@
   }
   .sample-badge strong{color:var(--ink);display:block;font-size:12px;margin-bottom:1px;}
 
+  .urgent-summary{
+    display:flex;gap:8px;align-items:flex-start;
+    background:var(--critical-soft);
+    border:1px solid var(--critical);
+    border-radius:10px;
+    padding:9px 10px;
+    font-size:11.5px;
+    color:var(--ink-soft);
+    line-height:1.4;
+  }
+  .urgent-summary strong{color:var(--critical);display:block;font-size:12px;margin-bottom:1px;}
+  .urgent-badge{
+    flex:none;width:16px;height:16px;border-radius:50%;background:var(--critical);color:#fff;
+    font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;
+    margin-left:auto;
+  }
+  .urgent-banner{
+    border:1px solid var(--critical);background:var(--critical-soft);border-radius:var(--radius-card);
+    padding:14px 16px;display:flex;flex-direction:column;gap:6px;
+  }
+  .urgent-banner-title{font-weight:700;color:var(--critical);font-size:13.5px;display:flex;align-items:center;gap:6px;}
+  .urgent-item{font-size:12.5px;color:var(--ink-soft);display:flex;gap:6px;}
+  .urgent-item .ic{flex:none;color:var(--critical);}
+
   .side-label{
     font-size:11px;text-transform:uppercase;letter-spacing:.06em;
     color:var(--ink-muted);font-weight:600;margin:2px 0 -6px;
@@ -597,6 +621,11 @@
     <div class="sample-badge">
       <span>&#9432;</span>
       <span><strong>Voorbeelddata</strong>Nog niet gekoppeld aan Google Analytics of Search Console. De cijfers hieronder zijn realistische demodata.</span>
+    </div>
+
+    <div class="urgent-summary" id="urgentSummary" hidden>
+      <span>&#9888;</span>
+      <span><strong id="urgentSummaryTitle"></strong>Open een klant met het rode bolletje voor de details.</span>
     </div>
 
     <div class="side-label">Websites</div>
@@ -1263,17 +1292,21 @@ function statusColorVar(status){
 function renderSidebar(){
   var list = document.getElementById('siteList');
   list.innerHTML = '';
+  var urgentSiteCount = 0;
   state.sites.forEach(function(site){
     var btn = document.createElement('button');
     btn.className = 'site-btn' + (site.id===state.activeId ? ' active' : '');
     btn.type = 'button';
     var status = site.statusOf(site.seoOverall);
+    var signals = getUrgentSignals(site);
+    if (signals.length) urgentSiteCount++;
     btn.innerHTML =
       '<span class="site-dot" style="background:'+statusColorVar(status)+'"></span>'+
       '<span class="site-btn-text">'+
         '<div class="site-btn-name"></div>'+
         '<div class="site-btn-sector"></div>'+
-      '</span>';
+      '</span>'+
+      (signals.length ? '<span class="urgent-badge" title="'+signals.length+' spoedmelding(en)">!</span>' : '');
     btn.querySelector('.site-btn-name').textContent = site.name;
     btn.querySelector('.site-btn-sector').textContent = site.sector;
     btn.addEventListener('click', function(){
@@ -1282,6 +1315,15 @@ function renderSidebar(){
     });
     list.appendChild(btn);
   });
+
+  var summary = document.getElementById('urgentSummary');
+  if (urgentSiteCount){
+    summary.hidden = false;
+    document.getElementById('urgentSummaryTitle').textContent =
+      urgentSiteCount===1 ? '1 klant heeft dringende aandacht nodig' : (urgentSiteCount+' klanten hebben dringende aandacht nodig');
+  } else {
+    summary.hidden = true;
+  }
 }
 
 function activeSite(){
@@ -1322,6 +1364,64 @@ function prevRangedSeries(site){
 function sum(arr, key){ return arr.reduce(function(a,p){ return a+p[key]; }, 0); }
 
 /* ============================================================
+   Spoedsignalen — automatische detectie van zaken die dringend
+   aandacht nodig hebben (geen losstaande AI-aanroep, maar directe
+   logica over de al beschikbare cijfers — werkt meteen, geen
+   extra account/kosten nodig). Gebruikt in renderSidebar() en
+   renderOverzicht(). Onafhankelijk van de gekozen periode (7/30/90
+   dagen) in de topbar, zodat badges niet wisselen als iemand
+   van periode wisselt.
+============================================================ */
+function getUrgentSignals(site){
+  var signals = [];
+  var days = site.series.length;
+
+  // 1. Plotselinge daling in bezoekers (laatste 30 dagen t.o.v. de 30 dagen daarvoor)
+  var cur30 = site.series.slice(Math.max(0, days-30));
+  var prev30 = site.series.slice(Math.max(0, days-60), Math.max(0, days-30));
+  var curV = sum(cur30,'sessions'), prevV = sum(prev30,'sessions');
+  if (prevV > 0){
+    var trafficDelta = (curV - prevV) / prevV * 100;
+    if (trafficDelta <= -35){
+      signals.push({key:'traffic', severity:'critical', label:'Bezoekers flink gedaald', detail:fmtPct(Math.abs(trafficDelta),0)+' minder bezoekers dan de 30 dagen ervoor.'});
+    } else if (trafficDelta <= -20){
+      signals.push({key:'traffic', severity:'warning', label:'Bezoekers dalen', detail:fmtPct(Math.abs(trafficDelta),0)+' minder bezoekers dan de 30 dagen ervoor.'});
+    }
+  }
+
+  // 2. Kritieke technische SEO-problemen
+  var criticalIssues = site.issues.filter(function(is){ return is.severity==='critical'; });
+  if (criticalIssues.length){
+    signals.push({key:'seo', severity:'critical', label:'Kritiek technisch probleem', detail:criticalIssues.length>1 ? (criticalIssues.length+' kritieke punten gevonden, o.a.: '+criticalIssues[0].text) : criticalIssues[0].text});
+  }
+
+  // 3. Zoekwoordposities die sterk gedaald zijn (hogere positie = lager in Google = slechter)
+  var droppedKw = site.keywords
+    .map(function(k){ return {q:k.q, drop:k.position-k.prevPosition}; })
+    .filter(function(k){ return k.drop >= 6; })
+    .sort(function(a,b){ return b.drop-a.drop; });
+  if (droppedKw.length){
+    var worst = droppedKw[0];
+    signals.push({key:'ranking', severity: worst.drop>=12 ? 'critical' : 'warning', label:'Positie gedaald in Google', detail:'"'+worst.q+'" is '+worst.drop+' plekken gezakt'+(droppedKw.length>1 ? (' (en '+(droppedKw.length-1)+' ander(e) zoekwoord(en))') : '')+'.'});
+  }
+
+  // 4. Bijna verlopen contract / factuurdatum (echte data uit Bureau-tabblad, dus op basis
+  //    van de echte huidige datum — niet de vaste demo-ankerdatum TODAY)
+  if (site.nextInvoiceDate && site.contractStatus==='actief'){
+    var todayReal = new Date(); todayReal.setHours(0,0,0,0);
+    var invDate = new Date(site.nextInvoiceDate+'T00:00:00');
+    var daysUntil = Math.round((invDate-todayReal)/86400000);
+    if (daysUntil < 0){
+      signals.push({key:'invoice', severity:'critical', label:'Factuurdatum verstreken', detail:'Factuurdatum was op '+fmtDateNl(site.nextInvoiceDate)+'.'});
+    } else if (daysUntil <= 7){
+      signals.push({key:'invoice', severity:'warning', label:'Factuurdatum nadert', detail:'Factuurdatum is op '+fmtDateNl(site.nextInvoiceDate)+'.'});
+    }
+  }
+
+  return signals;
+}
+
+/* ============================================================
    Render: Overzicht tab
 ============================================================ */
 function renderOverzicht(){
@@ -1341,7 +1441,19 @@ function renderOverzicht(){
   function deltaPct(nowV, prevV){ return prevV ? ((nowV-prevV)/prevV*100) : 0; }
 
   var panel = document.getElementById('panel-overzicht');
+  var urgentSignals = getUrgentSignals(site);
+  var urgentHtml = '';
+  if (urgentSignals.length){
+    urgentHtml =
+      '<div class="urgent-banner">'+
+        '<div class="urgent-banner-title"><span>&#9888;</span> Dringende aandacht nodig voor '+escapeHtml(site.name)+'</div>'+
+        urgentSignals.map(function(s){
+          return '<div class="urgent-item"><span class="ic">&#9679;</span><span><strong>'+escapeHtml(s.label)+'.</strong> '+escapeHtml(s.detail)+'</span></div>';
+        }).join('')+
+      '</div>';
+  }
   panel.innerHTML =
+    urgentHtml+
     '<div class="stat-grid" id="statGrid"></div>'+
     '<div class="grid-2">'+
       '<div class="card">'+
